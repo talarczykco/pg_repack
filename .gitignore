@@ -7,3 +7,4 @@ regress/regression.out
 regress/results/
 dist/*.zip
 lib/exports.list
+venv/
