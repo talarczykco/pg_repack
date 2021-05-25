@@ -6,7 +6,7 @@ import queries
 import time
 
 
-def initdb(c, dbname=None):
+def setup_database(c, dbname=None):
     if dbname:
         c.repack.dbname = dbname
     c.config.conn = psycopg2.connect(dbname=c.repack.dbname, host='localhost')
@@ -15,7 +15,7 @@ def initdb(c, dbname=None):
         cursor.execute('CREATE EXTENSION IF NOT EXISTS pg_repack;')
 
 
-def selectone(c):
+def find_bloated_table(c):
     dict_cur = psycopg2.extras.DictCursor
     with c.config.conn.cursor(cursor_factory=dict_cur) as cursor:
         cursor.execute(queries.show_database_bloat())
@@ -26,24 +26,10 @@ def selectone(c):
 @task
 def build(c):
     """
-    Build the Dockerfile
+    Build Docker image from Dockerfile.
     """
     cmd = f'docker build -t {c.repack.image} .'
     c.run(cmd, hide=False)
-
-
-@task(help={
-    'dbname': 'Name of the database to connect to',
-})
-def select(c, dbname=None):
-    """
-    Select one table to rebuild
-    """
-    initdb(c, dbname)
-    record = selectone(c)
-    print('INFO: table={} tbloat={} wastedbytes={}'.format(
-        record['tablename'], record['tbloat'], record['wastedbytes']))
-    c.repack.table = record['tablename']
 
 
 @task(help={
@@ -52,15 +38,20 @@ def select(c, dbname=None):
 })
 def repack(c, dbname=None, table=None):
     """
-    Repack the specified table
+    Repack the specified table, or auto-select one if not specified.
     """
-    initdb(c, dbname)
-    if table is None:
-        select(c)
+    setup_database(c, dbname)
+    print(f'INFO: dbname={c.repack.dbname}')
+
+    if table:
+        c.repack.table = table
+    else:
+        result = find_bloated_table(c)
+        print('INFO: table={} tbloat={} wastedbytes={}'.format(
+            result['tablename'], result['tbloat'], result['wastedbytes']))
         print('Ctrl-C to abort or repack in 5 seconds...')
         time.sleep(5)
-    else:
-        c.repack.table = table
+        c.repack.table = result['tablename']
 
     cmd = ' '.join([
         'docker run', c.repack.image, c.repack.dbname,
@@ -70,7 +61,7 @@ def repack(c, dbname=None, table=None):
     c.run(cmd)
 
 
-ns = Collection(build, repack, select)
+ns = Collection(build, repack)
 ns.configure({
     'repack': {
         'dbname': 'tfdev1',
