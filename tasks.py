@@ -1,66 +1,80 @@
 from invoke import Collection, task
 
-import queries
 import psycopg2
 import psycopg2.extras
+import queries
+import time
 
 
-def init(c, dbname):
-    c.config.conn = psycopg2.connect(f'dbname={dbname} host=localhost')
+def initdb(c, dbname=None):
+    if dbname:
+        c.repack.dbname = dbname
+    c.config.conn = psycopg2.connect(dbname=c.repack.dbname, host='localhost')
     c.config.conn.set_session(autocommit=True)
-    with c.config.conn.cursor() as cur:
-        cur.execute('CREATE EXTENSION IF NOT EXISTS pg_repack;')
-        cur.execute('CREATE EXTENSION IF NOT EXISTS pgstattuple;')
+    with c.config.conn.cursor() as cursor:
+        cursor.execute('CREATE EXTENSION IF NOT EXISTS pg_repack;')
 
 
-def get_dead_tuple_percent(c, table):
-    with c.config.conn.cursor() as cur:
-        cur.execute('SELECT dead_tuple_percent FROM pgstattuple(%s);', [table])
-        return cur.fetchone()[0]
+def selectone(c):
+    dict_cur = psycopg2.extras.DictCursor
+    with c.config.conn.cursor(cursor_factory=dict_cur) as cursor:
+        cursor.execute(queries.show_database_bloat())
+        return cursor.fetchone()
+    return None
 
 
 @task
 def build(c):
+    """
+    Build the Dockerfile
+    """
     cmd = f'docker build -t {c.repack.image} .'
     c.run(cmd, hide=False)
 
 
-@task
-def test(c, table):
-    dbname = c.repack.dbname
-    c.config.conn = psycopg2.connect(f'dbname={dbname} host=localhost')
-    c.config.conn.set_session(autocommit=True)
-    dict_cur = psycopg2.extras.DictCursor
-    with c.config.conn.cursor(cursor_factory=dict_cur) as cur:
-        # TBD: pass args, fix "IndexError: tuple index out of range"
-        cur.execute(queries.show_database_bloat())
-        for rec in cur:
-            print('{}: {} ({})'.format(
-                rec["tablename"],
-                rec["tbloat"],
-                rec["wastedbytes"]
-            ))
+@task(help={
+    'dbname': 'Name of the database to connect to',
+})
+def select(c, dbname=None):
+    """
+    Select one table to rebuild
+    """
+    initdb(c, dbname)
+    record = selectone(c)
+    print('INFO: table={} tbloat={} wastedbytes={}'.format(
+        record['tablename'], record['tbloat'], record['wastedbytes']))
+    c.repack.table = record['tablename']
 
 
-@task
-def repack(c, table):
-    init(c, c.repack.dbname)
-    print(f'INFO: dead_tuple_percent={get_dead_tuple_percent(c, table)}')
+@task(help={
+    'dbname': 'Name of the database to connect to',
+    'table': 'Name of the table to rebuild',
+})
+def repack(c, dbname=None, table=None):
+    """
+    Repack the specified table
+    """
+    initdb(c, dbname)
+    if table is None:
+        select(c)
+        print('Ctrl-C to abort or repack in 5 seconds...')
+        time.sleep(5)
+    else:
+        c.repack.table = table
+
     cmd = ' '.join([
         'docker run', c.repack.image, c.repack.dbname,
         '-h', c.repack.host,
-        '-t', table
+        '-t', c.repack.table,
     ])
     c.run(cmd)
-    print(f'INFO: dead_tuple_percent={get_dead_tuple_percent(c, table)}')
 
 
-ns = Collection(build, repack, test)
+ns = Collection(build, repack, select)
 ns.configure({
     'repack': {
         'dbname': 'tfdev1',
         'host': 'host.docker.internal',
         'image': 'peloton/pg_repack:0.1',
-        'threshold': 1000000,   # threshold in bytes of wasted space
     }
 })
