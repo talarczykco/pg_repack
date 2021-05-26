@@ -1,4 +1,5 @@
 from psycopg2 import sql
+from psycopg2.extras import DictCursor
 
 
 def assert_database_name(c, dbname):
@@ -14,11 +15,20 @@ def assert_database_name(c, dbname):
 
 
 def get_dead_tuple_percent(c, table):
-    with c.config.conn.cursor() as cursor:
+    with c.config.conn.cursor(cursor_factory=DictCursor) as cursor:
         cursor.execute("""
-            SELECT dead_tuple_percent FROM pgstattuple(%s)
+            SELECT  pg_size_pretty(table_len)   as table_len,
+                    tuple_count,
+                    tuple_len,
+                    tuple_percent,
+                    dead_tuple_count,
+                    dead_tuple_len,
+                    dead_tuple_percent,
+                    pg_size_pretty(free_space)  as free_space,
+                    free_percent
+            FROM pgstattuple(%s)
         """, [table])
-        result = cursor.fetchone()[0]
+        result = cursor.fetchall()
         return result
 
 
