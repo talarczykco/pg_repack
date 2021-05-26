@@ -9,7 +9,7 @@ def assert_database_name(c, dbname):
         cursor.execute("""
             SELECT CASE WHEN current_database() = %s THEN TRUE ELSE FALSE END;
         """, [dbname])
-        result = cursor.fetchone()
+        result = cursor.fetchone()[0]
         return result
 
 
@@ -18,7 +18,8 @@ def get_dead_tuple_percent(c, table):
         cursor.execute("""
             SELECT dead_tuple_percent FROM pgstattuple(%s)
         """, [table])
-        return cursor.fetchone()[0]
+        result = cursor.fetchone()[0]
+        return result
 
 
 def show_database_bloat():
