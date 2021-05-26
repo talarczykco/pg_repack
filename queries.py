@@ -1,6 +1,18 @@
 from psycopg2 import sql
 
 
+def assert_database_name(c, dbname):
+    """
+    Return True if `current_database()` is `dbname`
+    """
+    with c.config.conn.cursor() as cursor:
+        cursor.execute("""
+            SELECT CASE WHEN current_database() = %s THEN TRUE ELSE FALSE END;
+        """, [dbname])
+        result = cursor.fetchone()
+        return result
+
+
 def get_dead_tuple_percent(c, table):
     with c.config.conn.cursor() as cursor:
         cursor.execute("""
@@ -16,7 +28,11 @@ def show_database_bloat():
     - don't forget to double-escape "%" as "%%" when using "%s"!
     """
     query = sql.SQL(''' -- # noqa: E501
-        SELECT schemaname, tablename, tbloat, pg_size_pretty(sum(wastedbytes + wastedibytes)::bigint) as totalwaste
+        SELECT  schemaname,
+                tablename,
+                tbloat,
+                sum(wastedbytes + wastedibytes)::bigint as totalwaste,
+                pg_size_pretty(sum(wastedbytes + wastedibytes)::bigint) as prettywaste
         FROM (
             SELECT
               current_database(), schemaname, tablename, /*reltuples::bigint, relpages::bigint, otta,*/
@@ -65,8 +81,9 @@ def show_database_bloat():
             WHERE iname != '?'
         ) AS filter
         WHERE schemaname = 'public'
-        AND wastedbytes > %s
+        AND tbloat > 1.0
         GROUP BY schemaname, tablename, tbloat
+        HAVING sum(wastedbytes + wastedibytes) > 100000000
         ORDER BY totalwaste DESC;
         ''')
     return query
