@@ -9,10 +9,15 @@ import time
 
 
 class DatabaseNotFound(Exception):
-    pass
+    """
+    Database not found
+    """
 
 
 def setup_database(c, dbname=None):
+    """
+    Setup logging, dbname, connections, etc
+    """
     # setup basic logging
     logging.basicConfig(level=logging.INFO,
                         format='%(levelname)s: %(message)s')
@@ -30,6 +35,7 @@ def setup_database(c, dbname=None):
     c.config.conn.initialize(c.logger)
     c.config.conn.set_session(autocommit=True)
 
+    # are we connected to the right database?
     if queries.assert_database_name(c, dbname):
         c.logger.info(f'dbname={c.repack.dbname}')
     else:
@@ -41,6 +47,9 @@ def setup_database(c, dbname=None):
 
 
 def get_bloated_tables(c):
+    """
+    Helper method for finding bloated tables
+    """
     with c.config.conn.cursor(cursor_factory=DictCursor) as cursor:
         cursor.execute(queries.show_database_bloat(), [c.repack.threshold])
         return cursor.fetchall()
