@@ -1,0 +1,40 @@
+# README.peloton
+
+vim:ft=markdown:
+
+## Name
+
+`peloton/pg_repack` -- a fork of the upstream for local modifications and tooling
+
+## Synopsis
+
+1. `direnv allow` (or `source .envrc`) to activate venv
+1. `invoke --list` to show available tasks
+1. `invoke repack` to repack one table, auto-selected algorithmically
+
+## Table Selection
+
+If a table is not specified to repack using `invoke repack -t <table_name>` one will be selected for you.
+
+The algorithm is something along the lines of:
+
+1. Find all bloated tables in the database (see `queries.py`)
+1. Pick the smallest table that is **over** a given threshold (in bytes wasted)
+1. Rebuild the table
+
+This requires a `postgres` superuser connection, defaulting to localhost:5432 (note: this is accessed from the Docker container as `host.docker.internal`).
+
+The rebuild happens online, while other traffic is happening. There is a brief lock taken while the new table is swapped into active use.
+
+If the rebuild fails, there may be leftover triggers on the source table. This can be cleaned up the next invocation by dropping and recreating the extension.
+
+Ideally, rebuilding the auto-selected table will drop it under the threshold of bytes wasted. So, running the command a second time will repack the next table in line.
+
+The algorithm purposely starts with the smallest table over the threshold in order to reclaim space. `pg_repack` requires an amount of free space equal to 2x the table size the table you are rebuilding. Repacking smaller tables first reclaims more space for larger tables to use for repacking.
+
+`pg_repack` can loop through all tables in a database, but we wanted to exert greater control over execution to avoid downtime or performance impact (which we're still measuring, at time of this writing).
+
+## See Also
+
+* https://reorg.github.io/pg_repack/
+* https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/Appendix.PostgreSQL.CommonDBATasks.html#Appendix.PostgreSQL.CommonDBATasks.pg_repack
