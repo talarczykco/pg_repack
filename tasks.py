@@ -7,22 +7,35 @@ import psycopg2
 import queries
 import time
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(levelname)s: %(message)s')
-logger = logging.getLogger(__name__)
+
+class DatabaseNotFound(Exception):
+    pass
 
 
 def setup_database(c, dbname=None):
+    # setup basic logging
+    logging.basicConfig(level=logging.INFO,
+                        format='%(levelname)s: %(message)s')
+    c.logger = logging.getLogger(__name__)
+
+    # set database name
     if dbname:
         c.repack.dbname = dbname
-    logger.info(f'dbname={c.repack.dbname}')
+
+    # does this work?
     c.config.conn = psycopg2.connect(
         connection_factory=LoggingConnection,
         dbname=c.repack.dbname,
         host='localhost')
-    c.config.conn.initialize(logger)
+    c.config.conn.initialize(c.logger)
     c.config.conn.set_session(autocommit=True)
+
+    if queries.assert_database_name(c, dbname):
+        c.logger.info(f'dbname={c.repack.dbname}')
+    else:
+        raise DatabaseNotFound(f'{c.repack.dbname} not found!')
+
+    # install necessary extensions
     with c.config.conn.cursor() as cursor:
         cursor.execute('CREATE EXTENSION IF NOT EXISTS pg_repack;')
 
@@ -68,29 +81,26 @@ def repack(c, dbname=None, table=None):
     else:
         result = get_bloated_tables(c)[0]
         if result:
-            logger.info('table={} tbloat={} totalwaste={}'.format(
+            c.logger.info('table={} tbloat={} totalwaste={}'.format(
                 result['tablename'], result['tbloat'], result['totalwaste']))
             print('Ctrl-C to abort or repack in 5 seconds...')
             time.sleep(5)
             c.repack.table = result['tablename']
         else:
-            logger.error('No candidate table found.')
+            c.logger.error('No candidate table found.')
             return None
 
     cmd = ' '.join([
-        'docker run', c.repack.image, c.repack.dbname,
+        'docker run',
+        '-e', 'PGOPTIONS="-c idle_in_transaction_session_timeout=0"',
+        c.repack.image, c.repack.dbname,
         '-h', c.repack.host,
         '-t', c.repack.table,
         ])
-    env = {
-        # neither of these seem to work
-        # 'PGOPTIONS': '-c idle_in_transaction_session_timeout=100ms'
-        'PGOPTIONS': '-c statement_timeout=100ms'
-        }
     start_time = time.monotonic()
-    c.run(cmd, env=env)
+    c.run(cmd)
     elapsed_time = time.monotonic() - start_time
-    logger.info(f'Completed in {elapsed_time:.2f} seconds.')
+    c.logger.info(f'Completed in {elapsed_time:.2f} seconds.')
 
 
 ns = Collection(build, show, repack)
