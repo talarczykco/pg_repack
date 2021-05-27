@@ -16,14 +16,14 @@ def assert_database_name(c, dbname):
 def get_dead_tuple_percent(c, table):
     with c.config.conn.cursor(cursor_factory=DictCursor) as cursor:
         cursor.execute("""
-            SELECT  pg_size_pretty(table_len)   as table_len,
+            SELECT  pg_size_pretty(table_len) as table_len,
                     tuple_count,
-                    tuple_len,
+                    pg_size_pretty(tuple_len) as tuple_len,
                     tuple_percent,
                     dead_tuple_count,
-                    dead_tuple_len,
+                    pg_size_pretty(dead_tuple_len) as dead_tuple_len,
                     dead_tuple_percent,
-                    pg_size_pretty(free_space)  as free_space,
+                    pg_size_pretty(free_space) as free_space,
                     free_percent
             FROM pgstattuple(%s)
         """, [table])
