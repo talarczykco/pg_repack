@@ -65,6 +65,18 @@ def show(c, dbname=None):
     print(tabulate(result, headers='keys', tablefmt='psql', floatfmt=".2f"))
 
 
+@task
+def stat(c, dbname, table):
+    """
+    Select tuple stats from pgstattuple(table)
+    """
+    setup_database(c, dbname)
+    # https://learning.oreilly.com/library/view/mastering-postgresql-96/9781783555352/b88418eb-983e-446e-a715-9028b03fa48f.xhtml
+    c.logger.info('https://www.postgresql.org/docs/11/pgstattuple.html')
+    result = queries.get_dead_tuple_percent(c, table)
+    print(tabulate(result, headers='keys', tablefmt='psql', floatfmt=".2f"))
+
+
 @task(help={
     'dbname': 'Name of the database to connect to',
     'table': 'Name of the table to rebuild',
@@ -92,11 +104,7 @@ def repack(c, dbname=None, table=None):
             c.logger.error('No candidate table found.')
             return None
 
-    # https://learning.oreilly.com/library/view/mastering-postgresql-96/9781783555352/b88418eb-983e-446e-a715-9028b03fa48f.xhtml
-    c.logger.info('https://www.postgresql.org/docs/11/pgstattuple.html')
-    result = queries.get_dead_tuple_percent(c, c.repack.table)
-    print(tabulate(result, headers='keys', tablefmt='psql', floatfmt=".2f"))
-
+    stat(c, dbname, table)
     cmd = ' '.join([
         'docker run',
         '-e', 'PGOPTIONS="-c idle_in_transaction_session_timeout=0"',
@@ -108,12 +116,10 @@ def repack(c, dbname=None, table=None):
     c.run(cmd)
     elapsed_time = time.monotonic() - start_time
     c.logger.info(f'done in {elapsed_time:.2f} seconds.')
-
-    result = queries.get_dead_tuple_percent(c, c.repack.table)
-    print(tabulate(result, headers='keys', tablefmt='psql', floatfmt=".2f"))
+    stat(c, dbname, table)
 
 
-ns = Collection(build, show, repack)
+ns = Collection(build, show, stat, repack)
 ns.configure({
     'repack': {
         'dbname': None,
