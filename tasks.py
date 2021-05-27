@@ -116,8 +116,7 @@ def repack(c, dbname=None, table=None):
 ns = Collection(build, show, repack)
 ns.configure({
     'repack': {
-
-        'dbname': 'tfdev1',
+        'dbname': None,
         'host': 'host.docker.internal',
         'image': 'peloton/pg_repack:0.1',
         'schema': 'public',
