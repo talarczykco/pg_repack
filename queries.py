@@ -1,4 +1,3 @@
-from psycopg2 import sql
 from psycopg2.extras import DictCursor
 
 
@@ -32,13 +31,14 @@ def get_dead_tuple_percent(c, table):
         return result
 
 
-def show_database_bloat():
+def get_bloated_tables(c):
     """
     Notes:
     - "noqa: E501" for flake8 long lines
     - don't forget to double-escape "%" as "%%" when using "%s"!
     """
-    query = sql.SQL(''' -- # noqa: E501
+    with c.config.conn.cursor(cursor_factory=DictCursor) as cursor:
+        cursor.execute(''' -- # noqa: E501
         SELECT  schemaname,
                 tablename,
                 tbloat,
@@ -91,10 +91,15 @@ def show_database_bloat():
             ) AS sml
             WHERE iname != '?'
         ) AS filter
-        WHERE schemaname = 'public'
-        AND tbloat > 1.0
+        WHERE schemaname = %s
+        AND tbloat > %s
         GROUP BY schemaname, tablename, tbloat
-        HAVING sum(wastedbytes + wastedibytes) > 100000000
+        HAVING sum(wastedbytes + wastedibytes) > %s
         ORDER BY totalwaste DESC;
-        ''')
-    return query
+        ''', [
+          c.repack.schema,
+          c.repack.tbloat,
+          c.repack.threshold,
+        ])
+        result = cursor.fetchall()
+        return result
