@@ -1,5 +1,5 @@
 from invoke import Collection, task
-from psycopg2.extras import DictCursor, LoggingConnection
+from psycopg2.extras import LoggingConnection
 from tabulate import tabulate
 
 import logging
@@ -46,16 +46,6 @@ def setup_database(c, dbname=None):
         cursor.execute('CREATE EXTENSION IF NOT EXISTS pg_repack;')
 
 
-def get_bloated_tables(c):
-    """
-    Helper method for finding bloated tables
-    """
-    with c.config.conn.cursor(cursor_factory=DictCursor) as cursor:
-        cursor.execute(queries.show_database_bloat(), [c.repack.threshold])
-        return cursor.fetchall()
-    return None
-
-
 @task
 def build(c):
     """
@@ -71,7 +61,7 @@ def show(c, dbname=None):
     Show all available tables to repack.
     """
     setup_database(c, dbname)
-    result = get_bloated_tables(c)
+    result = queries.get_bloated_tables(c)
     print(tabulate(result, headers='keys', tablefmt='psql', floatfmt=".2f"))
 
 
@@ -86,18 +76,26 @@ def repack(c, dbname=None, table=None):
     setup_database(c, dbname)
 
     if table:
+        c.logger.info(f'table={table}')
         c.repack.table = table
     else:
-        result = get_bloated_tables(c)[0]
+        c.logger.info('Table not specified, auto-selecting table...')
+        # pick last (smallest) table from output
+        result = queries.get_bloated_tables(c)[-1]
         if result:
             c.logger.info('table={} tbloat={} totalwaste={}'.format(
-                result['tablename'], result['tbloat'], result['totalwaste']))
+                result['tablename'], result['tbloat'], result['prettywaste']))
             print('Ctrl-C to abort or repack in 5 seconds...')
             time.sleep(5)
             c.repack.table = result['tablename']
         else:
             c.logger.error('No candidate table found.')
             return None
+
+    # https://learning.oreilly.com/library/view/mastering-postgresql-96/9781783555352/b88418eb-983e-446e-a715-9028b03fa48f.xhtml
+    c.logger.info('https://www.postgresql.org/docs/11/pgstattuple.html')
+    result = queries.get_dead_tuple_percent(c, c.repack.table)
+    print(tabulate(result, headers='keys', tablefmt='psql', floatfmt=".2f"))
 
     cmd = ' '.join([
         'docker run',
@@ -109,15 +107,21 @@ def repack(c, dbname=None, table=None):
     start_time = time.monotonic()
     c.run(cmd)
     elapsed_time = time.monotonic() - start_time
-    c.logger.info(f'Completed in {elapsed_time:.2f} seconds.')
+    c.logger.info(f'done in {elapsed_time:.2f} seconds.')
+
+    result = queries.get_dead_tuple_percent(c, c.repack.table)
+    print(tabulate(result, headers='keys', tablefmt='psql', floatfmt=".2f"))
 
 
 ns = Collection(build, show, repack)
 ns.configure({
     'repack': {
+
         'dbname': 'tfdev1',
         'host': 'host.docker.internal',
         'image': 'peloton/pg_repack:0.1',
-        'threshold': 0,     # 1000000,
+        'schema': 'public',
+        'tbloat': 1.1,
+        'threshold': 1000000000,
     }
 })
